@@ -269,7 +269,6 @@ mod tests {
         for test_pt in random_pts(10) {
             let closest_bf = Option::Some(closest_point_brute_force(&pts, &test_pt));
             let closest_q = q.closest_point(&test_pt);
-            assert!(false);
 
             assert_eq!(closest_bf, closest_q);
         }
