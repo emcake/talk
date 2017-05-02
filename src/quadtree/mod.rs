@@ -1,11 +1,13 @@
-extern crate arrayvec;
-
 use vec::Vector2;
 use vec::Bound2;
 use vec::Vectorable;
 
 use std::marker::PhantomData;
+
+use spacetree::SpaceTree;
+use spacetree::Dist;
     
+    /*
 #[derive(Debug)]
 pub enum Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorable {
     Branch {
@@ -20,73 +22,50 @@ pub enum Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorable {
 }
 
 impl<B,V,T> Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorable {
-    fn bound(&self) -> &B {
-        match self {
-            &Quadtree::Branch { bound : ref b, children : _ } => b,
-            &Quadtree::Leaf {bound : ref b, points : _ , phantom: _} => b,
-        }
-    }
 
-    
-    pub fn closest_point_inner(&self, pt : &V, mut best_sq_dist : &mut T, mut best : &mut Option<V>) -> () {
+    pub fn closest_point_inner<D:Dist<V>>(&self, pt : &V, mut best : &mut Option<(D::Output,V)>) -> () {
         let b = self.bound();
 
-        let rad = best_sq_dist.sqrt();
+        let closest = b.closest_bounded_point(pt);
 
-        if b.point_within(pt, rad) {
-            //println!("INB: {:?} {:?}",*pt, b);
-            
-            match self {
-                &Quadtree::Branch { bound : _, ref children } => {
-                    //work out the closest sub-quad and check that first - will hopefully reduce 'best_sq_dist' so we don't check further
-                    let x_half = pt.x() > (b.min().x() + b.min().y()) / T::two(); // true if in the second half of x
-                    let y_half = pt.y() > (b.min().y() + b.max().y()) / T::two(); // true if in the second half of y
-                    let off_idx = (x_half as usize) + ((y_half as usize) << 1); // graphical representation below...
-                    /*
-                    ---------------
-                    |      |      |
-                    |  00  |  01  |
-                    |      |      |
-                    ---------------
-                    |      |      |
-                    |  10  |  11  |
-                    |      |      |
-                    ---------------
-                    */
-                    for i in 0..4 {
-                        let i = (i + off_idx) % 4;
-                        //println!("CHECK_SUBQUAD_{:?}: {:?}", off_idx, children[i].bound());
-                        children[i].closest_point_inner(pt, &mut best_sq_dist, &mut best);
-                    }
-                },
-                &Quadtree::Leaf { bound : _, ref points, phantom : _ } => {
-                    for candidate in points.iter() {
-                        let sq_dist = candidate.dist_sq(pt);
-                        if sq_dist < *best_sq_dist {
-                            *best_sq_dist = sq_dist;
-                            *best = Option::Some(candidate.clone());
-                            //println!("NEW_BEST: {:?} @ {:?}", best_sq_dist.sqrt(), best);
+        let closest_dist = D::dist_between(&closest, pt);
+
+        match *best {
+            Some((ref best_dist, ref best)) if closest_dist > *best_dist => { // this candidate is not good enough
+
+            },
+            _ => {
+                match self {
+                    &Quadtree::Branch { bound : _, ref children } => {
+                        
+                    },
+                    &Quadtree::Leaf { bound : _, ref points, phantom : _ } => {
+                        for candidate in points.iter() {
+                            let dist = D::dist_between(candidate, pt);
+                            match *best {
+                                Some((ref best_dist, ref best)) if dist > *best_dist => { // this candidate is not good enough
+
+                                },
+                                _ => {
+                                    *best = Option::Some((dist, candidate.clone()));
+                                    //println!("NEW_BEST: {:?} @ {:?}", best_sq_dist.sqrt(), best);
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-        else
-        {
-            //println!("OOB: {:?} {:?}",*pt, b);
+            },
         }
     }
 
-    pub fn closest_point(&self, pt : &V) -> Option<(T,V)> {
+    pub fn closest_point<D:Dist<V>>(&self, pt : &V) -> Option<(D::Output,V)> {
         use std::f32; // you can put use declarations anywhere
-
-        let mut best_sq_dist = T::max_value();
 
         let mut best_point = None;
 
-        self.closest_point_inner(pt, &mut best_sq_dist, &mut best_point);
+        self.closest_point_inner::<D>(pt, &mut best_point);
 
-        best_point.map(|p| -> (T,V) { (best_sq_dist.sqrt(), p) })
+        best_point
     }
 
     pub fn points_close_to(&self, pt: &V, rad:T, pts: &mut Vec<V>) -> ()
@@ -113,11 +92,27 @@ impl<B,V,T> Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorabl
     }
 
     
-        
+}*/
 
-    fn make_inner(pts : &Vec<V>, bound : B, itr : i32) -> Box<Quadtree<B,V,T>> {
-        if pts.len() <= 1 || itr >= 10 {
-            Box::new(Quadtree::Leaf {bound : bound, points : pts.clone(), phantom : PhantomData})
+
+#[derive(Debug)]
+pub struct Quadtree<B : Bound2<V,T>,V : Vector2<T>,T : Vectorable> (Box<QuadtreeInner<B,V,T>>,B);
+
+#[derive(Debug)]
+pub enum QuadtreeInner<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorable {
+    Branch ( [Quadtree<B,V,T>; 4] ),
+    Leaf {
+        points : Vec<V>,
+        phantom : PhantomData<T>
+    }
+}
+
+impl<B,V,T> Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorable 
+{
+    fn make_inner<P : IntoIterator<Item=V>>(pts : P, bound : B, itr : i32) -> Self {
+        let mut ps : Vec<V> = pts.into_iter().collect();
+        if ps.len() <= 1 || itr >= 10 {
+            Quadtree(Box::new(QuadtreeInner::Leaf {points : ps, phantom : PhantomData}), bound)
         }
         else {
 
@@ -128,35 +123,119 @@ impl<B,V,T> Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorabl
             let hx = half(bound.min().x(), bound.max().x());
             let hy = half(bound.min().y(), bound.max().y());
 
-            let mut vecs = [vec![], vec![], vec![], vec![]];
+            let iters = 
+                {
+                    use itertools::partition;
 
-            for p in pts.iter() {
-                match (p.x() < hx, p.y() < hy) {
-                    (true, true) => vecs[0].push(*p),
-                    (false, true) => vecs[1].push(*p),
-                    (true, false) => vecs[2].push(*p),
-                    (false, false) => vecs[3].push(*p)
-                }              
-            };
+                    let x_split = partition(&mut ps, |p|{ p.y() < hy });
+
+                    let y1_split : usize = partition(&mut ps[0..x_split], |p|{ p.x() < hx });
+                    let y2_split : usize = partition(&mut ps[x_split..], |p|{ p.x() < hx }) + x_split;
+
+                    [
+                        (0, y1_split),
+                        (y1_split, x_split),
+                        (x_split, y2_split),
+                        (y2_split, ps.len())
+                    ]
+                };
 
             let bounds = bound.split(hx, hy);
 
-            use self::arrayvec::ArrayVec;
+            use arrayvec::ArrayVec;
 
-            let kids : [Box<Quadtree<B,V,T>>;4] = 
+            let kids : [Self;4] = 
                 {
-                    let output : ArrayVec<[Box<Quadtree<B,V,T>>;4]> = 
-                        bounds.into_iter().zip(vecs.into_iter()).map(|(&b,v)| -> Box<Quadtree<B,V,T>> {
-                            Quadtree::make_inner(v, b, itr+1)
+                    let output : ArrayVec<[Self;4]> = 
+                        bounds.into_iter().zip(iters.into_iter()).map(|(&b,&(s,e))| {
+                            let mut sec = vec!();
+                            for p in &ps[s..e] {
+                                sec.push(*p);
+                            }
+                            Self::make_inner(sec, b, itr+1)
                         }).collect();
                     output.into_inner().unwrap()
                 };
 
-            Box::new(Quadtree::Branch { bound : bound, children : kids })
+            Quadtree(Box::new(QuadtreeInner::Branch(kids)), bound)
         }
     }
 
-    pub fn make(pts : &Vec<V>) -> Box<Quadtree<B,V,T>> {
+    fn pick_search_order(pt: &V, b: &B) -> [usize; 4] {
+        //work out the closest sub-quad and check that first - will hopefully reduce 'best_sq_dist' so we don't check further
+        let x_half = pt.x() > (b.min().x() + b.min().y()) / T::two(); // true if in the second half of x
+        let y_half = pt.y() > (b.min().y() + b.max().y()) / T::two(); // true if in the second half of y
+        let off_idx = (x_half as usize) + ((y_half as usize) << 1); // graphical representation below...
+        /*
+        ---------------
+        |      |      |
+        |  00  |  01  |
+        |      |      |
+        ---------------
+        |      |      |
+        |  10  |  11  |
+        |      |      |
+        ---------------
+        */
+        let modulate = |i| { (i + off_idx) % 4 };
+        [
+            modulate(0),
+            modulate(1),
+            modulate(2),
+            modulate(3)
+        ]
+    }
+
+    fn closest_point_inner<'a, D:Dist<V>>(&'a self, target: &V, current_best : &mut Option<(D::Output, &'a V)>) {
+        let Quadtree(ref q, ref bound) = *self;
+
+        let closest_bounded = bound.closest_bounded_point(target);
+       
+        match *current_best {
+            Some((ref d, _)) if D::dist_between(target, &closest_bounded) > *d => (),
+            _ =>
+                match **q {
+                    QuadtreeInner::Branch(ref kids) => {
+                        // pick search order & enumerate
+                        for idx in Self::pick_search_order(target, bound).into_iter() {
+                            let child = &kids[*idx];
+                            child.closest_point_inner::<D>(target, current_best);
+                        }
+                    },
+                    QuadtreeInner::Leaf{ref points, phantom : _} => {
+                        for p in points {
+                            let dist = D::dist_between(target, p);
+                            match *current_best {
+                                Some((ref d, _)) if dist > *d => (),
+                                _ => *current_best = Some((dist, p))
+                            }
+                        }
+                    },
+                }
+        }
+    }
+
+}
+
+use std::iter::{Empty, Filter, FlatMap};
+
+struct QIter<'a, V : 'a> ( Box<Iterator<Item=&'a V> + 'a> );
+
+
+impl<'a, V> Iterator for QIter<'a, V> {
+     type Item = &'a V;
+
+     fn next(&mut self) -> Option<Self::Item>
+     {
+         self.0.next()
+     }
+}
+
+impl<'a, T : Vectorable, V : Vector2<T> + 'a, B : Bound2<V, T>> SpaceTree<'a, V> for Quadtree<B,V,T> {
+
+    type I = QIter<'a, V>;
+
+    fn new<Pts : IntoIterator<Item=V>>(pts:Pts) -> Self {
         let mut maxx = T::min_value();
         let mut maxy = T::min_value();
         let mut minx = T::max_value();
@@ -165,17 +244,49 @@ impl<B,V,T> Quadtree<B,V,T> where B : Bound2<V,T>, V : Vector2<T>, T : Vectorabl
         fn max<T : Vectorable>(x:T, y:T) -> T { if x > y {x} else {y} };
         fn min<T : Vectorable>(x:T, y:T) -> T { if x < y {x} else {y} };
 
-        for p in pts.iter() {
+        
+        let pts_clone : Vec<_> = pts.into_iter().map(|p| {
             maxx = max::<T>(maxx, p.x());
             maxy = max::<T>(maxy, p.y());
             minx = min::<T>(minx, p.x());
             miny = min::<T>(miny, p.y());
-        }
+            p
+        }).collect();
 
-        Quadtree::make_inner(pts, B::new(V::new(minx, miny), V::new(maxx, maxy)), 0)
+        Quadtree::make_inner(pts_clone, B::new(V::new(minx, miny), V::new(maxx, maxy)), 0)
     }
 
-    
+    fn closest_point<'b : 'a, D:Dist<V>>(&'a self, target : &'b V) -> Option<(D::Output, &'a V)> {
+        let mut opt = Option::None;
+        self.closest_point_inner::<D>(target, &mut opt);
+        opt
+    }
+
+    fn points_within_dist<'b : 'a, D:Dist<V>>(&'a self, target:&'b V, dist:&'b D::Output) -> Self::I {
+        let Quadtree(ref q, ref bound) = *self;
+
+        let closest_bounded = bound.closest_bounded_point(target);
+
+        let b : Box<Iterator<Item=&'a V> + 'a> = 
+        {
+            if D::dist_between(&closest_bounded, target) > *dist {
+                use std::iter::empty;
+                Box::new(empty::<&'a V>())
+            }
+            else {
+                match **q {
+                    QuadtreeInner::Branch(ref kids) => {
+                        Box::new(kids.iter().flat_map(move |q|{ q.points_within_dist::<D>(target, dist)}))
+                    },
+                    QuadtreeInner::Leaf{ref points, ..} => {
+                        Box::new(points.iter().filter(move |p|{ D::dist_between(p, target) < *dist}))
+                    }
+                }
+            }
+
+        };
+        QIter(b)
+    }
 }
 
 mod tests {
@@ -242,35 +353,77 @@ mod tests {
         v
     }
 
-    fn closest_point_brute_force(pts:&Vec<SimpleVec2<f32>>, p:&SimpleVec2<f32>) -> (f32, SimpleVec2<f32>)
+    fn closest_point_brute_force<'a>(pts:&'a Vec<SimpleVec2<f32>>, p:&SimpleVec2<f32>) -> (f32, &'a SimpleVec2<f32>)
     {
-        let mut best = pts[0];
+        let mut best = &pts[0];
         let mut best_dist_sq = best.dist_sq(p);
 
         for pt in pts {
             let d = pt.dist_sq(p);
             if d < best_dist_sq {
                 best_dist_sq = d;
-                best = *pt;
+                best = pt;
             }
         }
 
         (best_dist_sq.sqrt(), best)
     }
+    
+    #[derive(Debug)]
+    struct SimpleVecDist;
+
+    use spacetree::Dist;
+    impl Dist<SimpleVec2<f32>> for SimpleVecDist {
+        type Output = f32;
+        fn dist_between(s1 : &SimpleVec2<f32>, s2 : &SimpleVec2<f32>) -> f32 {
+            return s1.dist_sq(s2).sqrt();
+        }
+    }
 
     #[test]
     fn closest_point_returns_same_as_brute_force() {
-        let pts = random_pts(100);
+        let pts = random_pts(10);
+
+        let bf_clone = pts.clone();
 
         use quadtree::Quadtree;
+        use spacetree::SpaceTree;
 
-        let q = Quadtree::< SimpleBound<SimpleVec2<f32> >, SimpleVec2<f32>, f32>::make(&pts);
+        let q = Quadtree::< SimpleBound<SimpleVec2<f32> >, SimpleVec2<f32>, f32>::new(pts);
 
         for test_pt in random_pts(10) {
-            let closest_bf = Option::Some(closest_point_brute_force(&pts, &test_pt));
-            let closest_q = q.closest_point(&test_pt);
+            let closest_bf = Option::Some(closest_point_brute_force(&bf_clone, &test_pt));
+            let closest_q = q.closest_point::<SimpleVecDist>(&test_pt);
 
             assert_eq!(closest_bf, closest_q);
+        }
+
+        ()
+    }
+
+    #[test]
+    fn points_within_returns_same_as_brute_force() {
+        let pts = random_pts(100);
+
+        let bf_clone = pts.clone();
+
+        use quadtree::Quadtree;
+        use spacetree::SpaceTree;
+
+        let q = Quadtree::< SimpleBound<SimpleVec2<f32> >, SimpleVec2<f32>, f32>::new(pts);
+
+        let d = 1.0;
+
+        for test_pt in random_pts(10) {
+
+            use std::cmp::Ordering;
+
+            let mut pts_within : Vec<&SimpleVec2<f32>> = bf_clone.iter().filter(|p|{ p.dist_sq(&test_pt).sqrt() < d}).collect();
+            pts_within.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Less));
+            let mut pts_within_test : Vec<&SimpleVec2<f32>> = q.points_within_dist::<SimpleVecDist>(&test_pt, &d).collect();
+            pts_within_test.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Less));
+
+            assert_eq!(pts_within, pts_within_test);
         }
 
         ()

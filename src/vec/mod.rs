@@ -22,6 +22,8 @@ pub trait Vectorable : Copy + Debug
         fn min_value() -> Self;
 
         fn two() -> Self { Self::from(2u8) }
+
+        fn zero() -> Self { Self::from(0u8) }
     }
 
 pub trait Vector2<T> : Copy + Debug where T : Vectorable {
@@ -57,9 +59,42 @@ pub trait Bound2<V,T> : Debug + Copy
         ]
     }
 
-    fn point_within(&self, pt:&V, d:T) -> bool {
+    fn point_within(&self, pt:&V) -> bool {
 
-        (pt.x() - self.min().x()) >= (-d) && (pt.x() - self.max().x()) <= d && (pt.y() - self.min().y()) >= (-d) && (pt.y() - self.max().y()) <= d
+        let z = T::zero();
+
+        (pt.x() - self.min().x()) >= z && (pt.x() - self.max().x()) <= z && (pt.y() - self.min().y()) >= (-z) && (pt.y() - self.max().y()) <= z
     }
+
+    fn closest_bounded_point(&self, p:&V) -> V {
+        let y = 
+            {
+                if p.y() < self.min().y() {
+                    self.min().y()
+                }
+                else if p.y() > self.max().y() {
+                    self.max().y()
+                }
+                else{
+                    p.y()
+                }
+            };
+
+        let x = 
+            {
+                if p.x() < self.min().x() {
+                    self.min().x()
+                }
+                else if p.x() > self.max().x() {
+                    self.max().x()
+                }
+                else{
+                    p.x()
+                }
+            };
+
+        V::new(x,y)
+    }
+    
 }
 
